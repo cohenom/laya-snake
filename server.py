@@ -27,13 +27,13 @@ app = Flask(__name__, static_folder="static")
 sock = Sock(app)
 
 ARENA_SIZE = 1
-# Movement never waits on Laya (heuristic compute is sub-millisecond). Tried
-# 0 sleep first: measured ~17,500 ticks/sec, which is not actually faster in
-# any way that matters — browsers render at ~60fps max, so anything beyond
-# that just floods the websocket and backs up the browser's event queue
-# (makes it feel laggy/broken, not fast). 1/60s is the real ceiling for
-# anything perceivable; this is genuinely "max speed" in the way that counts.
+# Frame rate was already maxed out at 1/60s (browsers can't render faster,
+# so more frames/sec just floods the websocket without being visible). The
+# real remaining lever for "faster" is game speed, not frame rate: move the
+# snake several grid cells per rendered frame instead of one. STEPS_PER_TICK
+# multiplies effective movement speed while keeping the frame rate sane.
 TICK_SECONDS = 1 / 60
+STEPS_PER_TICK = 4
 
 print("Loading Laya agent (downloads weights on first run)...")
 brain = LayaBrain()
@@ -148,12 +148,13 @@ def ws_game(wsock):
         with lock:
             for s in slots:
                 g = s.game
-                s.chosen = heuristic_direction(g)
-                g.step(s.chosen)
-                s.best_score = max(s.best_score, g.score)
-                if not g.alive:
-                    s.deaths += 1
-                    g.reset()
+                for _ in range(STEPS_PER_TICK):
+                    s.chosen = heuristic_direction(g)
+                    g.step(s.chosen)
+                    s.best_score = max(s.best_score, g.score)
+                    if not g.alive:
+                        s.deaths += 1
+                        g.reset()
             frame = {
                 "tick": tick,
                 "grid_width": 16,
