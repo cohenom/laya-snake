@@ -26,13 +26,14 @@ from laya_brain import LayaBrain, heuristic_direction
 app = Flask(__name__, static_folder="static")
 sock = Sock(app)
 
-ARENA_SIZE = 8
-# Movement never waits on Laya (heuristic compute is sub-millisecond), so the
-# only thing capping tick rate is this sleep. 0.08s (12.5fps) was leftover
-# caution from when ticks were still Laya-gated; there's no real reason to
-# throttle this hard now. 25ms -> 40fps is smooth and about as fast as a
-# 16x16 single-cell-per-tick grid can move before it stops being legible.
-TICK_SECONDS = 0.025
+ARENA_SIZE = 1
+# Movement never waits on Laya (heuristic compute is sub-millisecond). Tried
+# 0 sleep first: measured ~17,500 ticks/sec, which is not actually faster in
+# any way that matters — browsers render at ~60fps max, so anything beyond
+# that just floods the websocket and backs up the browser's event queue
+# (makes it feel laggy/broken, not fast). 1/60s is the real ceiling for
+# anything perceivable; this is genuinely "max speed" in the way that counts.
+TICK_SECONDS = 1 / 60
 
 print("Loading Laya agent (downloads weights on first run)...")
 brain = LayaBrain()
