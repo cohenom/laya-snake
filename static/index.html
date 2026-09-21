@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Laya Snake</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --grid-line:      #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-up:      #2a78d6; /* slot 1 blue */
+    --series-down:    #eb6834; /* slot 2 orange */
+    --series-left:    #1baf7a; /* slot 3 aqua */
+    --series-right:   #eda100; /* slot 4 yellow */
+    --status-critical:#d03b3b;
+    --status-good:    #0ca30c;
+    --snake-body:     #2a78d6;
+    --snake-head:     #184f95;
+    --food:           #e34948;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --grid-line:      #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-up:      #3987e5;
+      --series-down:    #d95926;
+      --series-left:    #199e70;
+      --series-right:   #c98500;
+      --status-critical:#e66767;
+      --status-good:    #0ca30c;
+      --snake-body:     #3987e5;
+      --snake-head:     #86b6ef;
+      --food:           #e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --grid-line:      #2c2c2a;
+    --baseline:       #383835;
+    --border:         rgba(255,255,255,0.10);
+    --series-up:      #3987e5;
+    --series-down:    #d95926;
+    --series-left:    #199e70;
+    --series-right:   #c98500;
+    --status-critical:#e66767;
+    --status-good:    #0ca30c;
+    --snake-body:     #3987e5;
+    --snake-head:     #86b6ef;
+    --food:           #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    padding: 20px 20px 4px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--text-secondary); font-size: 13px; max-width: 760px; }
+  .layout {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 16px 20px 32px;
+    align-items: flex-start;
+  }
+  .panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-secondary);
+    margin: 0 0 12px;
+    font-weight: 600;
+  }
+  #board-wrap { flex: 0 0 auto; }
+  canvas#board {
+    display: block;
+    border-radius: 8px;
+    background: var(--surface-1);
+  }
+  .stats {
+    display: flex;
+    gap: 20px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+  .stat { min-width: 90px; }
+  .stat .v {
+    font-size: 26px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .l {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  #probs { flex: 0 0 320px; }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 56px 1fr 44px;
+    align-items: center;
+    gap: 10px;
+    height: 34px;
+  }
+  .bar-label { font-size: 13px; color: var(--text-secondary); }
+  .bar-track {
+    position: relative;
+    height: 14px;
+    background: var(--grid-line);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .bar-fill {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    border-radius: 7px;
+    transition: width 80ms linear;
+  }
+  .bar-pct {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--text-primary);
+  }
+  .chosen .bar-label { font-weight: 700; color: var(--text-primary); }
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .badge.override { background: var(--status-critical); color: #fff; }
+  .badge.laya { background: var(--status-good); color: #fff; }
+  .footer-note {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  #conn { font-size: 12px; color: var(--text-muted); margin-left: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Laya Snake <span id="conn">connecting…</span></h1>
+  <div class="sub">
+    Snake driven each tick by a real forward pass of the <a href="https://github.com/NandhaKishorM/laya" target="_blank" rel="noopener">Laya</a>
+    text/JSON decision model (a ModernBERT-large classifier, not a game AI) answering
+    a single <code>choice</code> question over the current board state.
+  </div>
+</header>
+<div class="layout">
+  <div class="panel" id="board-wrap">
+    <h2>Board</h2>
+    <canvas id="board" width="480" height="480"></canvas>
+    <div class="stats">
+      <div class="stat"><div class="v" id="score">0</div><div class="l">score</div></div>
+      <div class="stat"><div class="v" id="moves">0</div><div class="l">moves survived</div></div>
+      <div class="stat"><div class="v" id="overrides">0</div><div class="l">safety overrides</div></div>
+      <div class="stat"><div class="v" id="latency">–</div><div class="l">laya latency</div></div>
+    </div>
+  </div>
+  <div class="panel" id="probs">
+    <h2>Laya's confidence this tick</h2>
+    <div id="bars"></div>
+    <div class="footer-note" id="note">
+      The highlighted bar is Laya's raw top choice. A red "override" badge means that
+      choice was immediately fatal (wall/self hit) and a safety-net heuristic picked a
+      safe direction instead — Laya was never trained on spatial/grid reasoning, so
+      this fires sometimes.
+    </div>
+  </div>
+</div>
+<script>
+const DIRS = ["up", "down", "left", "right"];
+const seriesColor = {
+  up: "var(--series-up)",
+  down: "var(--series-down)",
+  left: "var(--series-left)",
+  right: "var(--series-right)",
+};
+
+const barsEl = document.getElementById("bars");
+DIRS.forEach(d => {
+  const row = document.createElement("div");
+  row.className = "bar-row";
+  row.id = "row-" + d;
+  row.innerHTML = `
+    <div class="bar-label">${d}</div>
+    <div class="bar-track"><div class="bar-fill" id="fill-${d}" style="width:0%;background:${seriesColor[d]}"></div></div>
+    <div class="bar-pct" id="pct-${d}">0%</div>
+  `;
+  barsEl.appendChild(row);
+});
+
+const canvas = document.getElementById("board");
+const ctx = canvas.getContext("2d");
+
+function drawBoard(frame) {
+  const cols = frame.grid_width, rows = frame.grid_height;
+  const cw = canvas.width / cols, ch = canvas.height / rows;
+  const style = getComputedStyle(document.documentElement);
+  ctx.fillStyle = style.getPropertyValue("--surface-1").trim();
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.strokeStyle = style.getPropertyValue("--grid-line").trim();
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= cols; x++) {
+    ctx.beginPath(); ctx.moveTo(x*cw+0.5, 0); ctx.lineTo(x*cw+0.5, canvas.height); ctx.stroke();
+  }
+  for (let y = 0; y <= rows; y++) {
+    ctx.beginPath(); ctx.moveTo(0, y*ch+0.5); ctx.lineTo(canvas.width, y*ch+0.5); ctx.stroke();
+  }
+
+  if (frame.food) {
+    ctx.fillStyle = style.getPropertyValue("--food").trim();
+    const [fx, fy] = frame.food;
+    const pad = Math.min(cw, ch) * 0.18;
+    ctx.beginPath();
+    ctx.arc(fx*cw + cw/2, fy*ch + ch/2, Math.min(cw, ch)/2 - pad, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  const body = frame.body;
+  ctx.fillStyle = style.getPropertyValue("--snake-body").trim();
+  for (let i = 1; i < body.length; i++) {
+    const [x, y] = body[i];
+    const pad = Math.min(cw, ch) * 0.08;
+    roundRect(x*cw+pad, y*ch+pad, cw-2*pad, ch-2*pad, 4);
+  }
+  if (body.length) {
+    const [hx, hy] = body[0];
+    ctx.fillStyle = style.getPropertyValue("--snake-head").trim();
+    const pad = Math.min(cw, ch) * 0.05;
+    roundRect(hx*cw+pad, hy*ch+pad, cw-2*pad, ch-2*pad, 5);
+  }
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function updateBars(frame) {
+  DIRS.forEach(d => {
+    const p = frame.probabilities[d] ?? 0;
+    document.getElementById("fill-" + d).style.width = (p*100).toFixed(1) + "%";
+    document.getElementById("pct-" + d).textContent = Math.round(p*100) + "%";
+    document.getElementById("row-" + d).classList.remove("chosen");
+  });
+  const row = document.getElementById("row-" + frame.chosen);
+  if (row) row.classList.add("chosen");
+
+  const note = document.getElementById("note");
+  let badge = "";
+  if (frame.overridden) {
+    badge = ' <span class="badge override">safety override</span>';
+  } else {
+    badge = ' <span class="badge laya">laya\'s pick</span>';
+  }
+  const lbl = document.getElementById("row-" + frame.chosen)?.querySelector(".bar-label");
+  if (lbl) {
+    // reset then append badge fresh each tick
+    lbl.innerHTML = frame.chosen + badge;
+  }
+}
+
+function updateStats(frame) {
+  document.getElementById("score").textContent = frame.score;
+  document.getElementById("moves").textContent = frame.moves;
+  document.getElementById("overrides").textContent = frame.override_count;
+  document.getElementById("latency").textContent = frame.latency_ms.toFixed(0) + " ms";
+}
+
+function connect() {
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const connEl = document.getElementById("conn");
+  ws.onopen = () => connEl.textContent = "connected";
+  ws.onclose = () => { connEl.textContent = "disconnected — retrying…"; setTimeout(connect, 1500); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = (ev) => {
+    const frame = JSON.parse(ev.data);
+    // clear any stale label badges from other rows
+    DIRS.forEach(d => {
+      const lbl = document.getElementById("row-" + d).querySelector(".bar-label");
+      if (d !== frame.chosen) lbl.textContent = d;
+    });
+    drawBoard(frame);
+    updateBars(frame);
+    updateStats(frame);
+  };
+}
+connect();
+</script>
+</body>
+</html>
