@@ -167,6 +167,30 @@
   .footer-note { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
   #conn { font-size: 11.5px; color: var(--text-muted); font-weight: 400; }
   #conn.live { color: var(--accent); }
+
+  .board-card { cursor: zoom-in; }
+  #fs-overlay {
+    position: fixed; inset: 0; background: rgba(10,11,10,0.72);
+    display: none; align-items: center; justify-content: center;
+    z-index: 100; padding: 24px; cursor: zoom-out;
+  }
+  #fs-overlay.open { display: flex; }
+  #fs-panel {
+    background: var(--surface-1); border-radius: 16px; padding: 22px;
+    cursor: default; text-align: center; max-width: 90vw;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  #fs-panel h3 { margin: 0 0 10px; font-size: 16px; }
+  canvas#fs-canvas {
+    display: block; border-radius: 10px; background: var(--surface-2);
+    width: min(72vh, 640px); height: min(72vh, 640px); margin: 0 auto;
+  }
+  #fs-meta {
+    display: flex; gap: 26px; justify-content: center; margin-top: 14px;
+    font-variant-numeric: tabular-nums;
+  }
+  #fs-meta .stat .v { font-size: 22px; }
+  #fs-close { font-size: 12px; color: var(--text-muted); margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -211,6 +235,19 @@
     </div>
   </div>
 </div>
+<div id="fs-overlay">
+  <div id="fs-panel">
+    <h3>Board #<span id="fs-id">0</span></h3>
+    <canvas id="fs-canvas" width="480" height="480"></canvas>
+    <div id="fs-meta">
+      <div class="stat"><div class="v" id="fs-score">0</div><div class="l">score</div></div>
+      <div class="stat"><div class="v" id="fs-best">0</div><div class="l">best</div></div>
+      <div class="stat"><div class="v" id="fs-deaths">0</div><div class="l">deaths</div></div>
+      <div class="stat"><div class="v" id="fs-agree">–</div><div class="l">laya agree</div></div>
+    </div>
+    <div id="fs-close">click anywhere outside the board, or press Esc, to close</div>
+  </div>
+</div>
 <script>
 const DIRS = ["up", "down", "left", "right"];
 const seriesColor = {
@@ -229,9 +266,27 @@ for (let i = 0; i < ARENA_SIZE; i++) {
     <canvas class="mini" id="mini-${i}" width="160" height="160"></canvas>
     <div class="board-meta"><span class="score" id="score-${i}">0</span><span id="deaths-${i}">0 deaths</span></div>
   `;
+  card.addEventListener("click", () => openFullscreen(i));
   arenaEl.appendChild(card);
   boardCards.push({ card, ctx: card.querySelector("canvas").getContext("2d") });
 }
+
+const fsOverlay = document.getElementById("fs-overlay");
+const fsCanvas = document.getElementById("fs-canvas");
+const fsCtx = fsCanvas.getContext("2d");
+let fullscreenId = null;
+
+function openFullscreen(id) {
+  fullscreenId = id;
+  document.getElementById("fs-id").textContent = id;
+  fsOverlay.classList.add("open");
+}
+function closeFullscreen() {
+  fullscreenId = null;
+  fsOverlay.classList.remove("open");
+}
+fsOverlay.addEventListener("click", (e) => { if (e.target === fsOverlay) closeFullscreen(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeFullscreen(); });
 
 const barsEl = document.getElementById("bars");
 DIRS.forEach(d => {
@@ -340,6 +395,15 @@ function connect() {
     });
     if (votingSlot && votingSlot.laya_choice) updateBars(votingSlot);
     updateLeaderboard(frame.slots);
+
+    if (fullscreenId !== null) {
+      const slot = frame.slots[fullscreenId];
+      drawMini(fsCtx, fsCanvas, slot, frame.grid_width, frame.grid_height);
+      document.getElementById("fs-score").textContent = slot.score;
+      document.getElementById("fs-best").textContent = slot.best_score;
+      document.getElementById("fs-deaths").textContent = slot.deaths;
+      document.getElementById("fs-agree").textContent = slot.agree_pct != null ? slot.agree_pct + "%" : "–";
+    }
   };
 }
 connect();

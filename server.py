@@ -27,7 +27,12 @@ app = Flask(__name__, static_folder="static")
 sock = Sock(app)
 
 ARENA_SIZE = 8
-TICK_SECONDS = 0.08  # movement never waits on Laya, so this can be fast
+# Movement never waits on Laya (heuristic compute is sub-millisecond), so the
+# only thing capping tick rate is this sleep. 0.08s (12.5fps) was leftover
+# caution from when ticks were still Laya-gated; there's no real reason to
+# throttle this hard now. 25ms -> 40fps is smooth and about as fast as a
+# 16x16 single-cell-per-tick grid can move before it stops being legible.
+TICK_SECONDS = 0.025
 
 print("Loading Laya agent (downloads weights on first run)...")
 brain = LayaBrain()
