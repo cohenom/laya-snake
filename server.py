@@ -1,6 +1,6 @@
-"""Local web server: runs the Snake game loop, asks the real Laya agent for a
-move each tick, and streams state + probabilities to the browser over a
-WebSocket. Single-user local demo, no auth.
+"""Local web server: runs an arena of many parallel Snake games and streams
+all of them to the browser over one WebSocket. Single-user local demo, no
+auth.
 """
 import json
 import time
@@ -14,13 +14,15 @@ from laya_brain import LayaBrain, heuristic_direction
 app = Flask(__name__, static_folder="static")
 sock = Sock(app)
 
-# Laya's own forward pass takes ~100ms; calling it every tick makes movement
-# feel exactly as slow as the model. Call it every DECISION_EVERY ticks for
-# strategy, and use the free heuristic_direction() fallback (no model call)
-# on the ticks in between, so the snake moves at TICK_SECONDS regardless of
-# Laya's latency.
-DECISION_EVERY = 4
-TICK_SECONDS = 0.12
+# Laya's own forward pass floors at ~100ms per game regardless of batch size
+# (measured: batching many games into one forward pass gave NO speedup on
+# this CPU — ~95-100ms/game at N=1 and N=64 alike, unlike the GPU-only
+# "7.2ms/q batched" figure in Laya's README). So instead of batching, one
+# arena game gets a real Laya decision per tick, round-robin, while the rest
+# move on the free heuristic_direction() fallback. The tick period is
+# whatever that one real Laya call takes — no artificial sleep — so this
+# runs literally as fast as Laya can produce a decision.
+ARENA_SIZE = 8
 
 print("Loading Laya agent (downloads weights on first run)...")
 brain = LayaBrain()
@@ -40,57 +42,85 @@ def health():
         "decisions_made": brain.decision_count,
         "overrides_fired": brain.override_count,
         "last_latency_s": round(brain.last_latency, 4),
+        "arena_size": ARENA_SIZE,
     }
 
 
-def build_frame(game, chosen, probs, overridden, latency, confidence, laya_this_tick):
-    return {
-        "grid_width": 16,
-        "grid_height": 16,
-        "body": [list(seg) for seg in game.body],
-        "food": list(game.food) if game.food else None,
-        "direction": game.direction,
-        "alive": game.alive,
-        "score": game.score,
-        "moves": game.moves,
-        "probabilities": probs,
-        "laya_confidence": confidence,
-        "chosen": chosen,
-        "overridden": overridden,
-        "override_count": brain.override_count,
-        "decision_count": brain.decision_count,
-        "latency_ms": round(latency * 1000, 1),
-        "laya_this_tick": laya_this_tick,
-    }
+class Slot:
+    """One arena board: a game plus its running stats."""
+
+    def __init__(self, slot_id):
+        self.id = slot_id
+        self.game = SnakeGame()
+        self.probs = {}
+        self.confidence = None
+        self.chosen = None
+        self.overridden = False
+        self.best_score = 0
+        self.deaths = 0
+        self.alive_ticks = 0
+
+    def to_json(self, is_active, latency_ms):
+        g = self.game
+        return {
+            "id": self.id,
+            "active": is_active,
+            "body": [list(seg) for seg in g.body],
+            "food": list(g.food) if g.food else None,
+            "alive": g.alive,
+            "score": g.score,
+            "best_score": self.best_score,
+            "deaths": self.deaths,
+            "moves": g.moves,
+            "probabilities": self.probs,
+            "chosen": self.chosen,
+            "overridden": self.overridden,
+            "latency_ms": latency_ms,
+        }
 
 
 @sock.route("/ws")
 def ws_game(wsock):
-    game = SnakeGame()
-    probs, confidence = {}, None
+    slots = [Slot(i) for i in range(ARENA_SIZE)]
     tick = 0
     while True:
         t0 = time.time()
-        laya_this_tick = tick % DECISION_EVERY == 0
-        if laya_this_tick:
-            chosen, probs, overridden, latency, confidence = brain.decide(game)
-        else:
-            chosen = game.direction
-            overridden = False
-            if game.is_fatal(chosen):
-                chosen = heuristic_direction(game)
-                overridden = True
-            latency = time.time() - t0
-        game.step(chosen)
-        frame = build_frame(game, chosen, probs, overridden, latency, confidence, laya_this_tick)
+        active = tick % ARENA_SIZE
+        active_latency_ms = 0.0
+        for s in slots:
+            g = s.game
+            if s.id == active:
+                chosen, probs, overridden, latency, confidence = brain.decide(g)
+                s.probs, s.confidence, s.overridden = probs, confidence, overridden
+                active_latency_ms = round(latency * 1000, 1)
+            else:
+                chosen = g.direction
+                overridden = False
+                if g.is_fatal(chosen):
+                    chosen = heuristic_direction(g)
+                    overridden = True
+                s.overridden = overridden
+            s.chosen = chosen
+            g.step(chosen)
+            s.best_score = max(s.best_score, g.score)
+            s.alive_ticks += 1
+            if not g.alive:
+                s.deaths += 1
+                g.reset()
+                s.alive_ticks = 0
+
+        frame = {
+            "tick": tick,
+            "active": active,
+            "grid_width": 16,
+            "grid_height": 16,
+            "tick_ms": round((time.time() - t0) * 1000, 1),
+            "decision_count": brain.decision_count,
+            "override_count": brain.override_count,
+            "slots": [s.to_json(s.id == active, active_latency_ms if s.id == active else 0.0) for s in slots],
+        }
         wsock.send(json.dumps(frame))
         tick += 1
-        if not game.alive:
-            time.sleep(1.5)
-            game.reset()
-            tick = 0
-        else:
-            time.sleep(max(0.0, TICK_SECONDS - (time.time() - t0)))
 
 
 if __name__ == "__main__":
