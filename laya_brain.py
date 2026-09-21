@@ -14,17 +14,42 @@ QUESTIONS = {
     "direction": {
         "type": "choice",
         "instructions": (
-            "Given the snake game state, which direction should the snake "
-            "move next to eat the food while avoiding walls and its own body?"
+            "Given the snake game state, which direction should the snake move "
+            "next? Correct answer must move toward the food's direction "
+            "according to the food_is_*_of_head flags, and must not be a "
+            "danger_* direction that is true."
         ),
         "criteria": {
-            "up": "move up (decrease y): safe only if danger_up is false",
-            "down": "move down (increase y): safe only if danger_down is false",
-            "left": "move left (decrease x): safe only if danger_left is false",
-            "right": "move right (increase x): safe only if danger_right is false",
+            "up": "correct if food_is_above_head is true and danger_up is false",
+            "down": "correct if food_is_below_head is true and danger_down is false",
+            "left": "correct if food_is_left_of_head is true and danger_left is false",
+            "right": "correct if food_is_right_of_head is true and danger_right is false",
         },
     }
 }
+
+
+def heuristic_direction(game, candidates=None):
+    """Free, instant fallback move: among non-fatal directions, the one that
+    reduces Manhattan distance to the food. No model call. Used both as
+    Laya's safety net and as the between-decision mover (see server.py) so
+    the snake doesn't have to wait on a ~100ms Laya call every tick.
+    """
+    from game import DIRS
+
+    candidates = candidates if candidates is not None else DIRS
+    safe_dirs = [d for d in candidates if not game.is_fatal(d)]
+    if not safe_dirs:
+        return game.direction  # no safe move; step() will end the game
+
+    hx, hy = game.head()
+    fx, fy = game.food if game.food else (hx, hy)
+
+    def dist_after(d):
+        dx, dy = DIRS[d]
+        return abs((hx + dx) - fx) + abs((hy + dy) - fy)
+
+    return min(safe_dirs, key=dist_after)
 
 
 class LayaBrain:
@@ -54,22 +79,9 @@ class LayaBrain:
         if game.is_fatal(laya_choice):
             # Safety net: Laya was never trained on grid/collision spatial
             # reasoning, so it can (and does) sometimes pick a direction that
-            # is immediately fatal. Fall back to the safest heuristic move —
-            # among non-fatal directions, the one that reduces Manhattan
-            # distance to the food, else any non-fatal direction, else give up.
-            safe_dirs = [d for d in probs if not game.is_fatal(d)]
-            if safe_dirs:
-                hx, hy = game.head()
-                fx, fy = game.food if game.food else (hx, hy)
-
-                def dist_after(d):
-                    from game import DIRS
-
-                    dx, dy = DIRS[d]
-                    return abs((hx + dx) - fx) + abs((hy + dy) - fy)
-
-                chosen = min(safe_dirs, key=dist_after)
-                overridden = True
-                self.override_count += 1
+            # is immediately fatal.
+            chosen = heuristic_direction(game, candidates=probs)
+            overridden = True
+            self.override_count += 1
 
         return chosen, probs, overridden, latency, ans.get("confidence")
